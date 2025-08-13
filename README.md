@@ -19,3 +19,12 @@ dune exec test/test_raft.exe
 ```
 
 not really usable as a library yet, more of a reference implementation.
+
+## status
+
+- [x] leader election
+- [x] log replication  
+- [x] commit advancement
+- [ ] snapshots (started, not done)
+- [ ] cluster membership changes
+- [ ] proper networking layer (currently just in-process)
