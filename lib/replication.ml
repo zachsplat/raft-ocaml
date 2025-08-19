@@ -17,7 +17,6 @@ let append_entry state data =
     index = last_idx + 1;
     data;
   } in
-  (* prepend, we keep log in reverse order internally *)
   state.log <- entry :: state.log;
   entry
 
@@ -46,7 +45,6 @@ let handle_append_entries state (req : Rpc.append_entries) =
     state.current_term <- req.term;
     state.role <- Follower;
     state.voted_for <- None;
-    (* check if we have the prev entry *)
     let prev_ok = req.prev_log_index = 0 ||
       (match get_entry state req.prev_log_index with
        | Some e -> e.term = req.prev_log_term
@@ -55,18 +53,24 @@ let handle_append_entries state (req : Rpc.append_entries) =
     if not prev_ok then
       { Rpc.term = state.current_term; success = false; match_index = 0 }
     else begin
-      (* append new entries, removing conflicts *)
+      (* remove conflicting entries first, then append *)
+      let sorted_entries = List.sort (fun a b -> compare a.index b.index) req.entries in
       List.iter (fun (entry : log_entry) ->
-        state.log <- List.filter (fun e -> e.index <> entry.index) state.log;
-        state.log <- entry :: state.log
-      ) req.entries;
-      (* update commit index *)
+        match get_entry state entry.index with
+        | Some existing when existing.term <> entry.term ->
+          (* conflict - remove this and all following *)
+          state.log <- List.filter (fun e -> e.index < entry.index) state.log;
+          state.log <- entry :: state.log
+        | None ->
+          state.log <- entry :: state.log
+        | Some _ -> ()  (* same entry, skip *)
+      ) sorted_entries;
       if req.leader_commit > state.commit_index then begin
-        let last_new = match req.entries with
+        let last_new_idx = match sorted_entries with
           | [] -> state.commit_index
-          | _ -> (List.hd req.entries).index  (* hm, this might be wrong *)
+          | l -> (List.nth l (List.length l - 1)).index
         in
-        state.commit_index <- min req.leader_commit last_new
+        state.commit_index <- min req.leader_commit last_new_idx
       end;
       let mi = match state.log with [] -> 0 | e :: _ -> e.index in
       { Rpc.term = state.current_term; success = true; match_index = mi }
@@ -82,7 +86,6 @@ let handle_append_response state peer_id (resp : Rpc.append_entries_resp) =
     Hashtbl.replace state.next_index peer_id (resp.match_index + 1);
     Hashtbl.replace state.match_index peer_id resp.match_index
   end else begin
-    (* decrement next_index and retry *)
     let ni = try Hashtbl.find state.next_index peer_id with Not_found -> 1 in
     Hashtbl.replace state.next_index peer_id (max 1 (ni - 1))
   end
