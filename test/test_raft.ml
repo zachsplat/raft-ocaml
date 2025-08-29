@@ -52,3 +52,15 @@ let () =
   test_election ();
   test_replication ();
   Printf.printf "all good\n"
+
+let test_log_ops () =
+  let s = Raft.Types.make_state 1 in
+  s.current_term <- 1;
+  ignore (Raft.Replication.append_entry s "a");
+  ignore (Raft.Replication.append_entry s "b");
+  ignore (Raft.Replication.append_entry s "c");
+  assert (Raft.Log.last_index s = 3);
+  assert (Raft.Log.last_term s = 1);
+  let slice = Raft.Log.get_slice s 2 3 in
+  assert (List.length slice = 2);
+  Printf.printf "log ops test passed\n%!"
